@@ -1,9 +1,14 @@
 """API de disponibilización del generador de exámenes (exam-app).
 
 Endpoints:
+  - POST /api/chat/stream     : chat con streaming SSE (eventos tipados)
+  - POST /api/chat            : chat sin streaming
+  - POST /api/files           : subida de adjuntos propios (extraer→indexar)
+  - WS   /ws                  : bus de notificaciones y cancelación
   - POST /subjects            : registrar una materia
   - POST /subjects/{id}/index : indexar material (RAG) de una materia
   - POST /exams/generate      : generar un examen a partir de un blueprint
+  - POST /v1/chat/completions : agente OpenAI-compatible (OpenWebUI legado)
   - GET  /health              : estado del servicio
 
 Uso (desarrollo, con los paquetes instalados en editable):
@@ -13,6 +18,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
@@ -21,12 +27,31 @@ from core.infrastructure.db.connection import SessionLocal  # noqa: E402
 from core.domain.models import Subject  # noqa: E402
 from core.domain.schemas.exam import ExamBlueprint  # noqa: E402
 from core.infrastructure.latex.templates.registry import TemplateId  # noqa: E402
+from exam_app.api.deps import get_chat_service  # noqa: E402
+from exam_app.api.v1.chat import router as chat_api_router  # noqa: E402
+from exam_app.api.v1.files import router as files_router  # noqa: E402
 from exam_app.api.v1.legacy_openai import router as chat_router  # noqa: E402
+from exam_app.api.v1.ws import router as ws_router  # noqa: E402
+from exam_app.core.config import settings as app_settings  # noqa: E402
+from exam_app.core.lifespan import lifespan  # noqa: E402
 
-app = FastAPI(title="Generador de Exámenes API", version="0.1.0")
+app = FastAPI(title="Generador de Exámenes API", version="0.2.0", lifespan=lifespan)
+
+# CORS: el frontend (Vite dev / nginx) llama a la API desde otro origen.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=app_settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Router del agente conversacional (OpenAI-compatible para OpenWebUI).
 app.include_router(chat_router)
+# Routers propios del frontend (etapa 2: backend reactivo).
+app.include_router(chat_api_router)
+app.include_router(files_router)
+app.include_router(ws_router)
 
 # Directorio de salida de PDFs (compartido con el latex-compiler vía volumen).
 # En el contenedor se monta en /app/output; localmente es data/agent_outputs.
