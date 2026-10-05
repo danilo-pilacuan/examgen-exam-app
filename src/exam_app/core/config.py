@@ -1,7 +1,7 @@
-"""Configuración de exam-app (pydantic-settings, lee .env).
+"""exam-app configuration (pydantic-settings, reads .env).
 
-Complementa `core.config` (shared kernel) con lo específico de la capa de
-API: orígenes CORS del frontend y URLs de servicios.
+Complements `core.config` (shared kernel) with API-layer specifics:
+CORS origins of the frontend and service URLs.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # Orígenes permitidos para CORS (frontend dev + prod, separados por coma).
+    # Allowed CORS origins (frontend dev + prod, comma-separated).
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
     @property

@@ -1,8 +1,8 @@
-"""Puertos (interfaces) de exam-app: desacoplan la API de las implementaciones.
+"""Ports (interfaces) of exam-app: decouple the API from implementations.
 
-Los routers consumen estos puertos vía `services/`; las implementaciones
-concretas viven en `infrastructure/` (LangGraph, sistema de archivos, etc.).
-Esto permite testear exam-app con dobles de prueba.
+Routers consume these ports via `services/`; concrete implementations live
+in `infrastructure/` (LangGraph, file system, etc.). This allows testing
+exam-app with test doubles.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from exam_app.schemas.events import SSEEvent
 
 @dataclass
 class FileResult:
-    """Resultado de la subida/procesamiento de un archivo."""
+    """Result of a file upload/processing."""
 
     file_id: str
     filename: str
@@ -25,7 +25,7 @@ class FileResult:
 
 
 class ChatEnginePort(Protocol):
-    """Motor de chat: orquesta el grafo conversacional."""
+    """Chat engine: orchestrates the conversational graph."""
 
     async def stream(
         self,
@@ -34,7 +34,7 @@ class ChatEnginePort(Protocol):
         subject_id: str | None = None,
         subject_name: str | None = None,
     ) -> AsyncIterator[SSEEvent]:
-        """Ejecuta un turno y emite eventos SSE (tokens + eventos tipados)."""
+        """Runs a turn and emits SSE events (tokens + typed events)."""
         ...
 
     async def invoke(
@@ -44,16 +44,16 @@ class ChatEnginePort(Protocol):
         subject_id: str | None = None,
         subject_name: str | None = None,
     ) -> dict[str, Any]:
-        """Ejecuta un turno completo (sin streaming) y devuelve el resultado."""
+        """Runs a full turn (no streaming) and returns the result."""
         ...
 
     def cancel(self, thread_id: str) -> None:
-        """Marca el thread como cancelado (la respuesta se descarta)."""
+        """Marks the thread as cancelled (the response is discarded)."""
         ...
 
 
 class FileServicePort(Protocol):
-    """Servicio de archivos: extraer → guardar → indexar."""
+    """File service: extract → save → index."""
 
     async def upload(
         self,
@@ -62,5 +62,5 @@ class FileServicePort(Protocol):
         subject_id: str | None = None,
         index: bool = True,
     ) -> FileResult:
-        """Procesa un archivo subido y (opcionalmente) lo indexa como material."""
+        """Processes an uploaded file and (optionally) indexes it as material."""
         ...

@@ -1,8 +1,8 @@
-"""WebSocket /ws: bus de notificaciones y cancelación.
+"""WebSocket /ws: notification and cancellation bus.
 
-Protocolo (JSON):
-  - Cliente → servidor: {"type": "cancel", "thread_id": "..."}
-  - Servidor → cliente: eventos SSE (mismo schema) + acks.
+Protocol (JSON):
+  - Client → server: {"type": "cancel", "thread_id": "..."}
+  - Server → client: SSE events (same schema) + acks.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ router = APIRouter(tags=["ws"])
 
 @router.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
-    """Canal push del frontend: notificaciones y cancelación."""
+    """Push channel of the frontend: notifications and cancellation."""
     await websocket.accept()
     bus: EventBus = get_event_bus()
     service: ChatService = get_chat_service()
@@ -30,7 +30,7 @@ async def ws_endpoint(websocket: WebSocket):
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 await websocket.send_json(
-                    {"v": 1, "type": "error", "thread_id": "", "payload": {"message": "JSON inválido"}}
+                    {"v": 1, "type": "error", "thread_id": "", "payload": {"message": "Invalid JSON"}}
                 )
                 continue
 
@@ -44,7 +44,7 @@ async def ws_endpoint(websocket: WebSocket):
                         "v": 1,
                         "type": "cancelled",
                         "thread_id": thread_id,
-                        "payload": {"message": "cancelación solicitada"},
+                        "payload": {"message": "cancellation requested"},
                     }
                 )
             elif msg_type == "ping":
@@ -55,7 +55,7 @@ async def ws_endpoint(websocket: WebSocket):
                         "v": 1,
                         "type": "error",
                         "thread_id": thread_id,
-                        "payload": {"message": f"tipo no soportado: {msg_type}"},
+                        "payload": {"message": f"unsupported type: {msg_type}"},
                     }
                 )
     except WebSocketDisconnect:

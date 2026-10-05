@@ -1,7 +1,7 @@
-"""Implementación de FileServicePort: extraer → guardar → indexar.
+"""FileServicePort implementation: extract → save → index.
 
-Reutiliza `core.domain.bank.material` (indexación RAG) y
-`core.infrastructure.files.extract` (extracción multi-formato).
+Reuses `core.domain.bank.material` (RAG indexing) and
+`core.infrastructure.files.extract` (multi-format extraction).
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from exam_app.domain.ports import FileResult
 
 
 class LocalFileService:
-    """FileServicePort sobre el sistema de archivos local + BD."""
+    """FileServicePort over the local file system + DB."""
 
     async def upload(
         self,
@@ -28,11 +28,11 @@ class LocalFileService:
         subject_name: str | None = None,
         index: bool = True,
     ) -> FileResult:
-        """Procesa un archivo subido: guarda, extrae e indexa (RAG)."""
+        """Processes an uploaded file: saves, extracts and indexes (RAG)."""
         import asyncio
 
         file_id = str(uuid.uuid4())
-        # Guardar el archivo físico en el repositorio de material.
+        # Save the physical file in the material repository.
         saved_path: Path | None = None
         if subject_name:
             try:
@@ -42,7 +42,7 @@ class LocalFileService:
             except Exception:  # noqa: BLE001
                 saved_path = None
 
-        # Extraer texto (a un temporal si no se guardó físicamente).
+        # Extract text (to a temp file if not physically saved).
         tmp_path = Path(f"/tmp/exam_app_{file_id}_{filename}")
         target = saved_path or tmp_path
         target.write_bytes(content)
@@ -62,7 +62,7 @@ class LocalFileService:
                 f"upload:{filename}",
                 False,
             )
-            chunks = int(res.get("chunks_guardados", 0))
+            chunks = int(res.get("chunks_saved", 0))
 
         return FileResult(
             file_id=file_id,

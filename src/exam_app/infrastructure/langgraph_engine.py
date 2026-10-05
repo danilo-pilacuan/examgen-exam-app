@@ -1,8 +1,8 @@
-"""Implementación de ChatEnginePort sobre el grafo conversacional.
+"""ChatEnginePort implementation over the conversational graph.
 
-Ejecuta el grafo de agents-backend en un hilo (para no bloquear el event
-loop), instala el contexto de eventos (EventBus + thread_id) para que las
-tools emitan eventos tipados, y transmite tokens + eventos por el bus.
+Runs the agents-backend graph in a thread (to avoid blocking the event
+loop), installs the event context (EventBus + thread_id) so tools emit
+typed events, and transmits tokens + events through the bus.
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ class LangGraphEngine:
     ) -> AsyncIterator[SSEEvent]:
         """Ejecuta el turno en un hilo y transmite eventos por el bus.
 
-        El hilo de ejecución publica en `self._bus`; este generador consume
+        The execution thread publishes to `self._bus`; this generator consumes
         del bus y produce los frames SSE hasta `done`/`error`/`cancelled`.
         """
         agent_bus = AgentEventBus()
@@ -95,13 +95,13 @@ class LangGraphEngine:
             except (asyncio.TimeoutError, StopAsyncIteration):
                 pass
 
-            # ¿Terminó el turno?
+            # Did the turn finish?
             if task.done():
                 done = True
                 break
             await asyncio.sleep(0.02)
 
-        # Resultado final: token único con el contenido (el streaming real
+        # Final result: single token with the content (real token streaming
         # de tokens llega con astream_events en la etapa 2.5).
         try:
             result = task.result()
@@ -111,7 +111,7 @@ class LangGraphEngine:
                 last = messages[-1]
                 content = getattr(last, "content", "") or ""
             # Filtrar el contenido del turno (el historial completo viene en
-            # result; el último mensaje AI es la respuesta).
+            # result; the last AI message is the response).
             if content:
                 yield SSEEvent(
                     type="token", thread_id=thread_id, payload={"delta": content}
@@ -124,7 +124,7 @@ class LangGraphEngine:
 
         if self._bus.is_cancelled(thread_id):
             yield SSEEvent(
-                type="cancelled", thread_id=thread_id, payload={"message": "cancelado"}
+                type="cancelled", thread_id=thread_id, payload={"message": "cancelled"}
             )
             self._bus.clear_cancel(thread_id)
             return

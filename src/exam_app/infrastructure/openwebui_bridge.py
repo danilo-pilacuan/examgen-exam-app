@@ -1,10 +1,10 @@
-"""Puente de compatibilidad: reexporta el cliente OpenWebUI.
+"""Compatibility bridge: re-exports the OpenWebUI client.
 
-Las tools de `agents_backend.conversational` importan de aquí
-(`exam_app.infrastructure.openwebui_bridge`) para mantener la convención de
-nombres que usaban antes de la reestructuración (`src.api.openwebui`).
+Tools in `agents_backend.conversational` import from here
+(`exam_app.infrastructure.openwebui_bridge`) to keep the naming convention
+used before the restructuring (`src.api.openwebui`).
 
-El cliente real vive en `exam_app.infrastructure.openwebui_client`.
+The real client lives in `exam_app.infrastructure.openwebui_client`.
 """
 from exam_app.infrastructure.openwebui_client import (  # noqa: F401
     build_attachment_markdown,

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mvp-exam-app"
 version = "0.1.0"
-description = "FastAPI â€” API pÃºblica/BFF del generador de exÃ¡menes"
+description = "FastAPI — public API/BFF of the exam generator"
 requires-python = ">=3.11"
 dependencies = [
     "mvp-core",

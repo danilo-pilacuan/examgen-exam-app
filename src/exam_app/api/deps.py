@@ -1,7 +1,7 @@
-"""Dependencias FastAPI (inyección de puertos y sesiones).
+"""FastAPI dependencies (port and session injection).
 
-Los routers piden aquí sus dependencias; las implementaciones concretas se
-resuelven en un solo lugar (fácil de sustituir por dobles en pruebas).
+Routers request their dependencies here; concrete implementations are
+resolved in a single place (easy to swap with doubles in tests).
 """
 from __future__ import annotations
 

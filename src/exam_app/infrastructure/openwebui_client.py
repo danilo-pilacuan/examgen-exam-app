@@ -1,12 +1,12 @@
-"""Integración con Open WebUI para subir archivos (adjuntos nativos).
+"""Open WebUI integration for file uploads (native attachments).
 
-Cuando el agente genera un PDF (examen), lo sube a Open WebUI vía su API de
-archivos (`/api/v1/files/`). Así el PDF aparece como un adjunto descargable
-NATIVO en el chat, en vez de un enlace HTTP externo en texto plano.
+When the agent generates a PDF (exam), it uploads it to Open WebUI via its
+file API (`/api/v1/files/`). This way the PDF appears as a NATIVE downloadable
+attachment in the chat, instead of an external HTTP link in plain text.
 
-Requisitos:
-  - Open WebUI debe estar accesible desde el exam-app (misma red Docker).
-  - Se autentica con el usuario admin por defecto (WEBUI_AUTH=false).
+Requirements:
+  - Open WebUI must be reachable from exam-app (same Docker network).
+  - Authentication uses the default admin user (WEBUI_AUTH=false).
 """
 from __future__ import annotations
 
@@ -36,13 +36,13 @@ def upload_file_to_openwebui(
     filename: str | None = None,
     mime_type: str = "application/pdf",
 ) -> dict:
-    """Sube un archivo a Open WebUI y devuelve el resultado (id, path, etc.).
+    """Uploads a file to Open WebUI and returns the result (id, path, etc.).
 
-    Reutilizable para PDFs de exámenes y exportaciones CSV/XLSX del banco.
+    Reusable for exam PDFs and CSV/XLSX bank exports.
     """
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
-        raise FileNotFoundError(f"No existe el archivo: {pdf_path}")
+        raise FileNotFoundError(f"File does not exist: {pdf_path}")
 
     token = _login_token()
     headers = {"Authorization": f"Bearer {token}"}
@@ -62,34 +62,34 @@ def upload_file_to_openwebui(
 
 def build_attachment_markdown(
     upload_result: dict,
-    titulo: str = "📄 **Examen en PDF adjunto al chat.**",
-    etiqueta: str = "Descargar el PDF",
+    titulo: str = "📄 **Exam PDF attached to the chat.**",
+    etiqueta: str = "Download the PDF",
 ) -> str:
-    """Construye el markdown con el enlace al adjunto nativo de Open WebUI.
+    """Builds the markdown with the link to the native Open WebUI attachment.
 
-    Open WebUI sirve los archivos subidos en:
+    Open WebUI serves uploaded files at:
       /api/v1/files/{file_id}/content
 
-    `titulo` y `etiqueta` permiten reutilizar el formato para otros adjuntos
-    (ej. exportaciones CSV/XLSX del banco de preguntas).
+    `titulo` and `etiqueta` allow reusing the format for other attachments
+    (e.g. CSV/XLSX exports of the question bank).
     """
     file_id = upload_result.get("id", "")
-    filename = upload_result.get("filename", "archivo")
-    # URL pública accesible desde el navegador del usuario.
+    filename = upload_result.get("filename", "file")
+    # Public URL accessible from the user's browser.
     content_url = f"{settings.openwebui_public_url}/api/v1/files/{file_id}/content"
     return (
         f"{titulo}\n"
-        f"Archivo: **{filename}**\n"
+        f"File: **{filename}**\n"
         f"📥 [{etiqueta}]({content_url})\n\n"
-        f"*También disponible en: `{content_url}`*"
+        f"*Also available at: `{content_url}`*"
     )
 
 
 def get_file_metadata(file_id: str) -> dict:
-    """Obtiene la metadata de un archivo de Open WebUI (nombre, tipo, contenido).
+    """Gets the metadata of an Open WebUI file (name, type, content).
 
-    Devuelve el dict del archivo tal como lo expone `/api/v1/files/{id}`.
-    Si el archivo no existe o no se puede acceder, lanza una excepción.
+    Returns the file dict as exposed by `/api/v1/files/{id}`.
+    If the file does not exist or cannot be accessed, raises an exception.
     """
     token = _login_token()
     headers = {"Authorization": f"Bearer {token}"}
@@ -103,10 +103,10 @@ def get_file_metadata(file_id: str) -> dict:
 
 
 def download_file_content(file_id: str) -> bytes:
-    """Descarga el binario de un archivo de Open WebUI.
+    """Downloads the binary of an Open WebUI file.
 
-    Si el archivo no tiene contenido binario accesible o falla, lanza una
-    excepción con un mensaje claro.
+    If the file has no accessible binary content or the download fails, raises
+    an exception with a clear message.
     """
     token = _login_token()
     headers = {"Authorization": f"Bearer {token}"}

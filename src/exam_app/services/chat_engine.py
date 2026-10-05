@@ -1,7 +1,7 @@
-"""Servicio de chat: orquesta el motor y expone la lógica de negocio.
+"""Chat service: orchestrates the engine and exposes business logic.
 
-Los routers consumen este servicio (nunca importan de agents-backend ni de
-core directamente).
+Routers consume this service (never import from agents-backend or core
+directly).
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from exam_app.services.event_bus import EventBus
 
 
 class ChatService:
-    """Caso de uso: conversar con el agente (streaming o invoke)."""
+    """Chat use case: converse with the agent (streaming or invoke)."""
 
     def __init__(self, engine: ChatEnginePort, bus: EventBus) -> None:
         self._engine = engine

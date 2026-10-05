@@ -1,7 +1,7 @@
-"""Bus de eventos de exam-app: pub/sub entre el motor de chat y SSE/WS.
+"""exam-app event bus: pub/sub between the chat engine and SSE/WS.
 
-Cada thread_id tiene su canal. El router SSE se suscribe antes de lanzar el
-turno y consume hasta el evento `done`/`error`/`cancelled`.
+Each thread_id has its own channel. The SSE router subscribes before
+launching the turn and consumes until the `done`/`error`/`cancelled` event.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from exam_app.schemas.events import SSEEvent
 
 
 class EventBus:
-    """Pub/sub en memoria de eventos SSE por thread_id (thread-safe)."""
+    """In-memory pub/sub of SSE events per thread_id (thread-safe)."""
 
     def __init__(self, max_buffer: int = 512) -> None:
         self._max_buffer = max_buffer
@@ -23,7 +23,7 @@ class EventBus:
         self._cancelled: set[str] = set()
 
     def publish(self, event: SSEEvent) -> None:
-        """Publica un evento (thread-safe, best-effort)."""
+        """Publishes an event (thread-safe, best-effort)."""
         with self._lock:
             q = self._queues[event.thread_id]
             q.append(event)
@@ -40,7 +40,7 @@ class EventBus:
         return EventSubscription(self, thread_id)
 
     def cancel(self, thread_id: str) -> None:
-        """Marca el thread como cancelado y despierta a los consumidores."""
+        """Marks the thread as cancelled and wakes up consumers."""
         with self._lock:
             self._cancelled.add(thread_id)
             waiters = list(self._waiters.get(thread_id, ()))
@@ -82,7 +82,7 @@ class EventBus:
 
 
 class EventSubscription:
-    """Suscripción asíncrona a los eventos de un thread."""
+    """Async subscription to the events of a thread."""
 
     def __init__(self, bus: EventBus, thread_id: str) -> None:
         self._bus = bus

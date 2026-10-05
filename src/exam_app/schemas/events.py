@@ -1,10 +1,10 @@
-"""Esquema versionado de los eventos SSE/WS (contrato con el frontend).
+"""Versioned SSE/WS event schema (contract with the frontend).
 
-Espejo de `agents_backend.shared.events` en el borde de la API: exam-app
-reenvía los eventos del agente sin conocer su semántica, pero valida la
-forma del sobre (v, type, thread_id).
+Mirror of `agents_backend.shared.events` at the API boundary: exam-app
+forwards agent events without knowing their semantics, but validates the
+envelope shape (v, type, thread_id).
 
-Ver docs/arquitectura-objetivo.md §5.
+See docs/arquitectura-objetivo.md §5.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ EventType = Literal[
 
 
 class SSEEvent(BaseModel):
-    """Sobre estándar de un evento SSE/WS."""
+    """Standard envelope of an SSE/WS event."""
 
     v: int = SCHEMA_VERSION
     type: EventType

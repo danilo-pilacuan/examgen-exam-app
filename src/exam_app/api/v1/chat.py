@@ -1,10 +1,10 @@
-"""Endpoints de chat propios del frontend.
+"""Own chat endpoints of the frontend.
 
-- POST /api/chat/stream : SSE con eventos tipados (tokens + widgets).
-- POST /api/chat        : turno completo (sin streaming).
+- POST /api/chat/stream : SSE with typed events (tokens + widgets).
+- POST /api/chat        : full turn (no streaming).
 
-El endpoint legado de OpenWebUI (/v1/chat/completions) vive en
-`legacy_openai.py` y no se toca.
+The legacy OpenWebUI endpoint (/v1/chat/completions) lives in
+`legacy_openai.py` and is not touched.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ async def chat_stream(
     req: ChatRequest,
     service: ChatService = Depends(get_chat_service),
 ):
-    """Chat con streaming SSE: tokens + eventos tipados de las tools."""
+    """Chat with SSE streaming: tokens + typed tool events."""
     thread_id = req.thread_id or str(uuid.uuid4())
 
     async def event_stream():
@@ -50,7 +50,7 @@ async def chat_invoke(
     req: ChatRequest,
     service: ChatService = Depends(get_chat_service),
 ):
-    """Chat sin streaming (un turno completo)."""
+    """Chat without streaming (a full turn)."""
     thread_id = req.thread_id or str(uuid.uuid4())
     result = await service.invoke(
         req.message, thread_id, req.subject_id, req.subject_name

@@ -1,8 +1,8 @@
-"""Lifespan de exam-app: inicialización y cierre de recursos.
+"""exam-app lifespan: resource initialization and shutdown.
 
-- Inicializa el checkpointer de LangGraph (Postgres) al arrancar y lo cierra
-  al apagar.
-- Prepara el directorio de salida compartido con latex-compiler.
+- Initializes the LangGraph checkpointer (Postgres) at startup and closes it
+  at shutdown.
+- Prepares the output directory shared with latex-compiler.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from core.infrastructure.files.output_paths import get_output_dir
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Startup/shutdown de la aplicación (FastAPI lifespan)."""
+    """Startup/shutdown of the application (FastAPI lifespan)."""
     # --- startup ---
     get_output_dir().mkdir(parents=True, exist_ok=True)
     app.state.checkpointer = None

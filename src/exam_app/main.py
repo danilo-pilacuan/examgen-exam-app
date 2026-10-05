@@ -1,17 +1,21 @@
-"""API de disponibilización del generador de exámenes (exam-app).
+"""API for exam generator delivery (exam-app).
 
 Endpoints:
-  - POST /api/chat/stream     : chat con streaming SSE (eventos tipados)
-  - POST /api/chat            : chat sin streaming
-  - POST /api/files           : subida de adjuntos propios (extraer→indexar)
-  - WS   /ws                  : bus de notificaciones y cancelación
-  - POST /subjects            : registrar una materia
-  - POST /subjects/{id}/index : indexar material (RAG) de una materia
-  - POST /exams/generate      : generar un examen a partir de un blueprint
-  - POST /v1/chat/completions : agente OpenAI-compatible (OpenWebUI legado)
-  - GET  /health              : estado del servicio
+  - POST /api/chat/stream     : chat with SSE streaming (typed events)
+  - POST /api/chat            : chat without streaming
+  - POST /api/files           : upload of own attachments (extract→index)
+  - WS   /ws                  : notification and cancellation bus
+  - GET/POST /subjects       : list / register subjects
+  - GET /subjects/{id}/questions : question bank (filters)
+  - PUT /questions/{id}/verification : human verification (HITL)
+  - GET /subjects/{id}/exams : exam history
+  - GET/DELETE /subjects/{id}/material : indexed material
+  - POST /subjects/{id}/index : index material (RAG) of a subject
+  - POST /exams/generate      : generate an exam from a blueprint
+  - POST /v1/chat/completions : OpenAI-compatible agent (OpenWebUI legacy)
+  - GET  /health              : service health
 
-Uso (desarrollo, con los paquetes instalados en editable):
+Usage (development, with packages installed in editable mode):
     uvicorn exam_app.main:app --host 0.0.0.0 --port 8000
 """
 import uuid
@@ -20,22 +24,23 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from core.infrastructure.db.connection import SessionLocal  # noqa: E402
-from core.domain.models import Subject  # noqa: E402
+from core.domain.models import Subject, MaterialChunk  # noqa: E402
 from core.domain.schemas.exam import ExamBlueprint  # noqa: E402
 from core.infrastructure.latex.templates.registry import TemplateId  # noqa: E402
 from exam_app.api.deps import get_chat_service  # noqa: E402
 from exam_app.api.v1.chat import router as chat_api_router  # noqa: E402
 from exam_app.api.v1.files import router as files_router  # noqa: E402
 from exam_app.api.v1.legacy_openai import router as chat_router  # noqa: E402
+from exam_app.api.v1.subjects import router as subjects_router  # noqa: E402
+from exam_app.api.v1.exams import router as exams_material_router  # noqa: E402
 from exam_app.api.v1.ws import router as ws_router  # noqa: E402
 from exam_app.core.config import settings as app_settings  # noqa: E402
 from exam_app.core.lifespan import lifespan  # noqa: E402
 
-app = FastAPI(title="Generador de Exámenes API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Exam Generator API", version="0.2.0", lifespan=lifespan)
 
 # CORS: el frontend (Vite dev / nginx) llama a la API desde otro origen.
 app.add_middleware(
@@ -52,15 +57,18 @@ app.include_router(chat_router)
 app.include_router(chat_api_router)
 app.include_router(files_router)
 app.include_router(ws_router)
+# REST routers for subjects, bank, exams and material (stage 5).
+app.include_router(subjects_router)
+app.include_router(exams_material_router)
 
-# Directorio de salida de PDFs (compartido con el latex-compiler vía volumen).
-# En el contenedor se monta en /app/output; localmente es data/agent_outputs.
+# Output directory for PDFs (shared with latex-compiler via volume).
+# In the container it is mounted at /app/output; locally it is data/agent_outputs.
 from core.infrastructure.files.output_paths import get_output_dir  # noqa: E402
 
 OUTPUT_DIR = get_output_dir()
 
 
-# Tipos de archivo servibles por GET /output (PDF de exámenes y exportaciones).
+# File types servable by GET /output (exam PDFs and exports).
 _ALLOWED_OUTPUT_MIME = {
     ".pdf": "application/pdf",
     ".csv": "text/csv",
@@ -70,13 +78,13 @@ _ALLOWED_OUTPUT_MIME = {
 
 @app.get("/output/{filename}")
 def download_output(filename: str):
-    """Sirve un archivo generado (PDF de examen, CSV/XLSX de exportación)."""
-    # Evitar path traversal: solo el nombre base del archivo.
+    """Serves a generated file (exam PDF, CSV/XLSX export)."""
+    # Prevent path traversal: only the base name of the file.
     safe = Path(filename).name
     file_path = OUTPUT_DIR / safe
     mime = _ALLOWED_OUTPUT_MIME.get(file_path.suffix.lower())
     if not file_path.exists() or mime is None:
-        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(
         file_path,
         media_type=mime,
@@ -85,16 +93,11 @@ def download_output(filename: str):
 
 
 # ---------------------------------------------------------------------------
-# Schemas de entrada
+# Input schemas (indexing and exam generation endpoints)
 # ---------------------------------------------------------------------------
-class SubjectIn(BaseModel):
-    name: str
-    id: str | None = None
-
-
 class IndexRequest(BaseModel):
     materials: list[str] = Field(
-        ..., description="Patrones glob o rutas a los archivos de material"
+        ..., description="Glob patterns or paths to material files"
     )
     clear: bool = False
 
@@ -114,34 +117,14 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/subjects")
-def create_subject(req: SubjectIn):
-    """Registra una materia (o devuelve la existente)."""
-    db = SessionLocal()
-    try:
-        subject = db.query(Subject).filter(Subject.name == req.name).first()
-        if subject is None:
-            subject = Subject(
-                id=uuid.UUID(req.id) if req.id else uuid.uuid4(),
-                name=req.name,
-            )
-            db.add(subject)
-            db.commit()
-            db.refresh(subject)
-            return {"id": str(subject.id), "name": subject.name, "created": True}
-        return {"id": str(subject.id), "name": subject.name, "created": False}
-    finally:
-        db.close()
-
-
 @app.post("/subjects/{subject_id}/index")
 def index_subject(subject_id: str, req: IndexRequest):
-    """Indexa el material de una materia (genera chunks + embeddings)."""
+    """Indexes the material of a subject (generates chunks + embeddings)."""
     from scripts.index_material import chunk_text, extract_file, resolve_materials
 
     files = resolve_materials(req.materials)
     if not files:
-        raise HTTPException(status_code=400, detail="No se encontraron archivos")
+        raise HTTPException(status_code=400, detail="No files found")
 
     all_chunks: list[tuple[str, int, str]] = []
     for f in files:
@@ -154,7 +137,7 @@ def index_subject(subject_id: str, req: IndexRequest):
             print(f"  ⚠️ {f}: {e}")
 
     if not all_chunks:
-        raise HTTPException(status_code=400, detail="No se pudo extraer texto")
+        raise HTTPException(status_code=400, detail="Could not extract text")
 
     from core.infrastructure.embeddings.embedder import embedder
     from core.domain.models import MaterialChunk
@@ -167,7 +150,7 @@ def index_subject(subject_id: str, req: IndexRequest):
         sid = uuid.UUID(subject_id)
         subject = db.get(Subject, sid)
         if subject is None:
-            raise HTTPException(status_code=404, detail="Materia no existe")
+            raise HTTPException(status_code=404, detail="Subject does not exist")
 
         if req.clear:
             db.query(MaterialChunk).filter(MaterialChunk.subject_id == sid).delete()
@@ -185,20 +168,20 @@ def index_subject(subject_id: str, req: IndexRequest):
 
 @app.post("/exams/generate")
 def generate_exam(req: ExamRequest):
-    """Genera un examen a partir de un blueprint."""
+    """Generates an exam from a blueprint."""
     from agents_backend.exam_pipeline.graph import run_exam_pipeline
 
-    # Resolver template_id
+    # Resolve template_id
     try:
         template = TemplateId(req.template_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Template inválido: {req.template_id}")
+        raise HTTPException(status_code=400, detail=f"Invalid template: {req.template_id}")
 
-    # Obtener el nombre de la materia
+    # Get the subject name
     db = SessionLocal()
     try:
         subject = db.get(Subject, uuid.UUID(req.subject_id))
-        subject_name = subject.name if subject else "Materia"
+        subject_name = subject.name if subject else "Subject"
     finally:
         db.close()
 
@@ -206,7 +189,7 @@ def generate_exam(req: ExamRequest):
         subject_id=req.subject_id,
         subject_name=subject_name,
         template_id=template,
-        raw_materials_paths=[],  # el RAG usa la BD, no archivos directos
+        raw_materials_paths=[],  # RAG uses the DB, not direct files
         blueprint=req.blueprint,
         persist=req.persist,
     )

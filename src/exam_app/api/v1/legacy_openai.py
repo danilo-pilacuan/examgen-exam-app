@@ -1,16 +1,16 @@
-"""API OpenAI-compatible para el agente conversacional.
+"""OpenAI-compatible API for the conversational agent.
 
-Expone el agente como un proveedor OpenAI-compatible para que OpenWebUI se
-conecte. Endpoints:
-  - GET  /v1/models             : lista los modelos disponibles (el agente).
-  - POST /v1/chat/completions   : conversación con el agente.
+Exposes the agent as an OpenAI-compatible provider for OpenWebUI to connect
+to. Endpoints:
+  - GET  /v1/models             : lists the available models (the agent).
+  - POST /v1/chat/completions   : conversation with the agent.
 
-Para el human-in-the-loop, la respuesta puede contener un bloque
-`confirmation_required` (con `thread_id` y `interrupt_id`) indicando que el
-agente pausó esperando la aprobación del profesor. El cliente (OpenWebUI vía
-una tool/acción, o un script) debe reanudar con `Command(resume=...)`.
+For human-in-the-loop, the response may contain a `confirmation_required`
+block (with `thread_id` and `interrupt_id`) indicating that the agent paused
+waiting for the professor's approval. The client (OpenWebUI via a
+tool/action, or a script) must resume with `Command(resume=...)`.
 
-Uso de streaming: se emite el contenido en chunks SSE (`text/event-stream`).
+Streaming usage: content is emitted in SSE chunks (`text/event-stream`).
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class ChatMessage(BaseModel):
 class ResumePayload(BaseModel):
     """Payload para reanudar un interrupt (human-in-the-loop)."""
 
-    approved: bool = Field(..., description="¿El profesor aprobó la acción pendiente?")
+    approved: bool = Field(..., description="Did the professor approve the pending action?")
     feedback: str | None = Field(
         default=None, description="Comentario opcional del profesor"
     )
@@ -46,7 +46,7 @@ class ChatCompletionRequest(BaseModel):
     model: str = "exam-agent"
     messages: list[ChatMessage]
     stream: bool = False
-    thread_id: str | None = Field(default=None, description="ID de conversación persistente")
+    thread_id: str | None = Field(default=None, description="Persistent conversation ID")
     resume: ResumePayload | None = Field(
         default=None,
         description="Para reanudar un interrupt (human-in-the-loop): {'approved': bool}",
@@ -54,14 +54,14 @@ class ChatCompletionRequest(BaseModel):
 
 
 def _content_to_text(content: str | list | None) -> str:
-    """Convierte el contenido de un mensaje OpenAI (string o lista de partes)
-    a texto plano.
+    """Converts the content of an OpenAI message (string or list of parts)
+    to plain text.
 
-    OpenWebUI, cuando hay archivos adjuntos, envía el mensaje del usuario con
-    `content` como una LISTA de partes (p. ej. `[{"type":"text","text":...},
-    {"type":"file",...}]` o con tags `<file .../>`). Esta función extrae el
-    texto y conserva los tags de archivo para que el agente pueda ver el
-    `file_id` del archivo adjunto.
+    OpenWebUI, when files are attached, sends the user message with
+    `content` as a LIST of parts (e.g. `[{"type":"text","text":...},
+    {"type":"file",...}]` or with `<file .../>` tags). This function extracts the
+    text and preserves the file tags so the agent can see the
+    `file_id` of the attached file.
     """
     if content is None:
         return ""
@@ -77,11 +77,11 @@ def _content_to_text(content: str | list | None) -> str:
                 if part_type == "text":
                     parts.append(str(part.get("text", "")))
                 elif part_type == "file":
-                    # Conservar el tag de archivo con su id/url para que el
-                    # agente pueda invocar `agregar_material_archivo`.
+                    # Keep the file tag with its id/url so the agent can
+                    # invoke `add_material_file`.
                     file = part.get("file", {}) or {}
                     fid = file.get("file_id") or part.get("id") or ""
-                    fname = file.get("filename") or part.get("name") or "archivo"
+                    fname = file.get("filename") or part.get("name") or "file"
                     parts.append(f'<file id="{fid}" name="{fname}"/>')
                 else:
                     # Cualquier otra parte: intentar extraer texto.
@@ -93,7 +93,7 @@ def _content_to_text(content: str | list | None) -> str:
 
 
 def _to_langgraph_messages(messages: list[ChatMessage]) -> list[dict]:
-    """Convierte mensajes del formato OpenAI al formato de LangGraph."""
+    """Converts messages from OpenAI format to LangGraph format."""
     out = []
     for m in messages:
         if m.role in ("system", "user", "assistant", "tool"):
@@ -123,7 +123,7 @@ async def chat_completions(req: ChatCompletionRequest):
     thread_id = req.thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
 
-    # Reanudar un interrupt (confirmación humana) o iniciar turno nuevo.
+    # Resume an interrupt (human confirmation) or start a new turn.
     if req.resume is not None:
         try:
             result = conversational_graph.invoke(
@@ -131,7 +131,7 @@ async def chat_completions(req: ChatCompletionRequest):
                 config=config,
             )
         except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=f"Error al reanudar: {str(e)[:200]}")
+            raise HTTPException(status_code=500, detail=f"Error resuming: {str(e)[:200]}")
     else:
         messages = _to_langgraph_messages(req.messages)
         initial: ConversationalState = {
@@ -144,7 +144,7 @@ async def chat_completions(req: ChatCompletionRequest):
         try:
             result = conversational_graph.invoke(initial, config=config)
         except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=f"Error del agente: {str(e)[:200]}")
+            raise HTTPException(status_code=500, detail=f"Agent error: {str(e)[:200]}")
 
     # Extraer el texto de la respuesta final.
     final_messages = result.get("messages", [])
@@ -153,7 +153,7 @@ async def chat_completions(req: ChatCompletionRequest):
         last = final_messages[-1]
         content = getattr(last, "content", "") or ""
 
-    # Detectar si quedó un interrupt pendiente (confirmación humana).
+    # Detect whether an interrupt is pending (human confirmation).
     pending_interrupt = None
     if getattr(result, "interrupts", None):
         pending_interrupt = {

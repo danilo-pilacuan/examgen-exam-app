@@ -1,9 +1,9 @@
-"""Endpoint de adjuntos propios: POST /api/files.
+"""Own attachment endpoint: POST /api/files.
 
-El frontend sube el archivo aquí (drag & drop); exam-app lo guarda, extrae
-el texto y lo indexa como material de la materia. El tag `<file id=.../>`
-se mantiene como convención para que `agregar_material_archivo` siga
-funcionando con adjuntos de OpenWebUI (legado).
+The frontend uploads the file here (drag & drop); exam-app saves it, extracts
+the text and indexes it as material of the subject. The `<file id=.../>` tag
+is kept as convention so `add_material_file` keeps working with OpenWebUI
+attachments (legacy).
 """
 from __future__ import annotations
 
@@ -25,12 +25,12 @@ async def upload_file(
     index: bool = Form(default=True),
     service: FileServicePort = Depends(get_file_service),
 ):
-    """Sube un archivo: extraer → guardar → indexar (RAG)."""
+    """Uploads a file: extract → save → index (RAG)."""
     if file.filename is None:
-        raise HTTPException(status_code=400, detail="Archivo sin nombre")
+        raise HTTPException(status_code=400, detail="File has no name")
     content = await file.read()
     if not content:
-        raise HTTPException(status_code=400, detail="Archivo vacío")
+        raise HTTPException(status_code=400, detail="Empty file")
 
     result = await service.upload(
         filename=file.filename,
