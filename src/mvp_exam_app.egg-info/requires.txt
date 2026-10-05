@@ -1,0 +1,5 @@
+mvp-core
+mvp-agents-backend
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.9
