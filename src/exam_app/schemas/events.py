@@ -39,7 +39,7 @@ class SSEEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
     def to_sse(self) -> str:
-        """Serializa como frame SSE (`event: <type>\\ndata: <json>\\n\\n`)."""
+        """Serializes as an SSE frame (`event: <type>\\ndata: <json>\\n\\n`)."""
         import json
 
         data = json.dumps(self.model_dump(), ensure_ascii=False)

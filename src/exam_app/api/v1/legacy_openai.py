@@ -34,11 +34,11 @@ class ChatMessage(BaseModel):
 
 
 class ResumePayload(BaseModel):
-    """Payload para reanudar un interrupt (human-in-the-loop)."""
+    """Payload to resume an interrupt (human-in-the-loop)."""
 
     approved: bool = Field(..., description="Did the professor approve the pending action?")
     feedback: str | None = Field(
-        default=None, description="Comentario opcional del profesor"
+        default=None, description="Optional comment from the professor"
     )
 
 
@@ -49,7 +49,7 @@ class ChatCompletionRequest(BaseModel):
     thread_id: str | None = Field(default=None, description="Persistent conversation ID")
     resume: ResumePayload | None = Field(
         default=None,
-        description="Para reanudar un interrupt (human-in-the-loop): {'approved': bool}",
+        description="To resume an interrupt (human-in-the-loop): {'approved': bool}",
     )
 
 
@@ -84,7 +84,7 @@ def _content_to_text(content: str | list | None) -> str:
                     fname = file.get("filename") or part.get("name") or "file"
                     parts.append(f'<file id="{fid}" name="{fname}"/>')
                 else:
-                    # Cualquier otra parte: intentar extraer texto.
+                    # Any other part: try to extract text.
                     text = part.get("text") or part.get("content") or ""
                     if text:
                         parts.append(str(text))
@@ -103,7 +103,7 @@ def _to_langgraph_messages(messages: list[ChatMessage]) -> list[dict]:
 
 @router.get("/models")
 def list_models():
-    """Lista el modelo del agente (formato OpenAI-compatible)."""
+    """Lists the agent model (OpenAI-compatible format)."""
     return {
         "object": "list",
         "data": [
@@ -119,7 +119,7 @@ def list_models():
 
 @router.post("/chat/completions")
 async def chat_completions(req: ChatCompletionRequest):
-    """Conversa con el agente. Devuelve la respuesta (streaming o JSON)."""
+    """Chats with the agent. Returns the response (streaming or JSON)."""
     thread_id = req.thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -146,7 +146,7 @@ async def chat_completions(req: ChatCompletionRequest):
         except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"Agent error: {str(e)[:200]}")
 
-    # Extraer el texto de la respuesta final.
+    # Extract the text of the final response.
     final_messages = result.get("messages", [])
     content = ""
     if final_messages:
@@ -187,7 +187,7 @@ async def chat_completions(req: ChatCompletionRequest):
 
     if req.stream:
         async def event_stream():
-            # Chunk de rol (inicio de la respuesta).
+            # Role chunk (start of the response).
             yield (
                 "data: " + json.dumps({
                     "id": payload["id"],
@@ -196,7 +196,7 @@ async def chat_completions(req: ChatCompletionRequest):
                     "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
                 }, ensure_ascii=False) + "\n\n"
             )
-            # Emitir el contenido en trozos (compatible con OpenAI streaming).
+            # Emit the content in chunks (OpenAI streaming compatible).
             if content:
                 for i in range(0, len(content), 20):
                     chunk_text = content[i:i + 20]

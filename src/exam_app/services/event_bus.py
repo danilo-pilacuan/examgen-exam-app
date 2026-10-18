@@ -115,5 +115,5 @@ class EventSubscription:
         self._closed = True
 
 
-# Singleton del bus (una instancia por proceso de exam-app).
+# Bus singleton (one instance per exam-app process).
 event_bus = EventBus()

@@ -55,17 +55,17 @@ class LangGraphEngine:
         subject_id: str | None = None,
         subject_name: str | None = None,
     ) -> AsyncIterator[SSEEvent]:
-        """Ejecuta el turno en un hilo y transmite eventos por el bus.
+        """Runs the turn in a thread and streams events through the bus.
 
         The execution thread publishes to `self._bus`; this generator consumes
-        del bus y produce los frames SSE hasta `done`/`error`/`cancelled`.
+        the bus and produces the SSE frames until `done`/`error`/`cancelled`.
         """
         agent_bus = AgentEventBus()
         loop = asyncio.get_running_loop()
 
         def _run() -> dict[str, Any]:
-            # Contexto de eventos para las tools (contextvar: solo visible
-            # dentro de este hilo).
+            # Event context for the tools (contextvar: only visible
+            # inside this thread).
             set_event_context(agent_bus, thread_id)
             try:
                 return conversational_graph.invoke(
@@ -77,11 +77,11 @@ class LangGraphEngine:
 
         task = loop.run_in_executor(None, _run)
 
-        # Consumir los eventos del agente mientras el turno corre.
+        # Consume the agent events while the turn runs.
         subscription = agent_bus.subscribe(thread_id)
         done = False
         while not done:
-            # Eventos tipados del agente (best-effort: si no hay, sigue).
+            # Typed agent events (best-effort: if none, keep going).
             try:
                 agent_event: AgentEvent = await asyncio.wait_for(
                     subscription.__anext__(), timeout=0.05
@@ -102,7 +102,7 @@ class LangGraphEngine:
             await asyncio.sleep(0.02)
 
         # Final result: single token with the content (real token streaming
-        # de tokens llega con astream_events en la etapa 2.5).
+        # arrives with astream_events in stage 2.5).
         try:
             result = task.result()
             messages = result.get("messages", [])
@@ -110,7 +110,7 @@ class LangGraphEngine:
             if messages:
                 last = messages[-1]
                 content = getattr(last, "content", "") or ""
-            # Filtrar el contenido del turno (el historial completo viene en
+            # Filter the turn content (the full history comes in
             # result; the last AI message is the response).
             if content:
                 yield SSEEvent(
@@ -139,7 +139,7 @@ class LangGraphEngine:
         subject_id: str | None = None,
         subject_name: str | None = None,
     ) -> dict[str, Any]:
-        """Turno completo sin streaming (para scripts y pruebas)."""
+        """Full turn without streaming (for scripts and tests)."""
         loop = asyncio.get_running_loop()
 
         def _run() -> dict[str, Any]:
@@ -165,5 +165,5 @@ class LangGraphEngine:
 
 
 def new_thread_id() -> str:
-    """Genera un thread_id nuevo."""
+    """Generates a new thread_id."""
     return str(uuid.uuid4())

@@ -42,7 +42,7 @@ from exam_app.core.lifespan import lifespan  # noqa: E402
 
 app = FastAPI(title="Exam Generator API", version="0.2.0", lifespan=lifespan)
 
-# CORS: el frontend (Vite dev / nginx) llama a la API desde otro origen.
+# CORS: the frontend (Vite dev / nginx) calls the API from another origin.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=app_settings.cors_origins_list,
@@ -51,9 +51,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Router del agente conversacional (OpenAI-compatible para OpenWebUI).
+# Conversational agent router (OpenAI-compatible for OpenWebUI).
 app.include_router(chat_router)
-# Routers propios del frontend (etapa 2: backend reactivo).
+# Frontend's own routers (stage 2: reactive backend).
 app.include_router(chat_api_router)
 app.include_router(files_router)
 app.include_router(ws_router)

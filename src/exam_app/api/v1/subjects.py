@@ -72,7 +72,7 @@ def create_subject(req: SubjectCreate):
 
 
 # ---------------------------------------------------------------------------
-# Banco de preguntas
+# Question bank
 # ---------------------------------------------------------------------------
 @router.get("/subjects/{subject_id}/questions", response_model=list[QuestionOut])
 def list_subject_questions(

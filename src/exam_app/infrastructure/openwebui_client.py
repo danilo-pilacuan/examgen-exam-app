@@ -18,7 +18,7 @@ from core.config import settings
 
 
 def _login_token() -> str:
-    """Obtiene un token JWT de Open WebUI con el usuario admin."""
+    """Gets a JWT token from Open WebUI with the admin user."""
     resp = requests.post(
         f"{settings.openwebui_url}/api/v1/auths/signin",
         json={
@@ -62,15 +62,15 @@ def upload_file_to_openwebui(
 
 def build_attachment_markdown(
     upload_result: dict,
-    titulo: str = "📄 **Exam PDF attached to the chat.**",
-    etiqueta: str = "Download the PDF",
+    title: str = "📄 **Exam PDF attached to the chat.**",
+    label: str = "Download the PDF",
 ) -> str:
     """Builds the markdown with the link to the native Open WebUI attachment.
 
     Open WebUI serves uploaded files at:
       /api/v1/files/{file_id}/content
 
-    `titulo` and `etiqueta` allow reusing the format for other attachments
+    `title` and `label` allow reusing the format for other attachments
     (e.g. CSV/XLSX exports of the question bank).
     """
     file_id = upload_result.get("id", "")
@@ -78,9 +78,9 @@ def build_attachment_markdown(
     # Public URL accessible from the user's browser.
     content_url = f"{settings.openwebui_public_url}/api/v1/files/{file_id}/content"
     return (
-        f"{titulo}\n"
+        f"{title}\n"
         f"File: **{filename}**\n"
-        f"📥 [{etiqueta}]({content_url})\n\n"
+        f"📥 [{label}]({content_url})\n\n"
         f"*Also available at: `{content_url}`*"
     )
 
