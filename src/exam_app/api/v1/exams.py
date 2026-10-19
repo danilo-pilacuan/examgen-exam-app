@@ -147,16 +147,17 @@ def delete_subject_material(
             detail="Specify source_file or delete_all=true",
         )
 
-    db = SessionLocal()
-    try:
-        stmt = select(MaterialChunk).where(MaterialChunk.subject_id == sid)
-        if req.source_file:
-            stmt = stmt.where(MaterialChunk.source_file == req.source_file)
+    from core.domain.material.service import delete_all_material, delete_source_file
 
-        chunks = list(db.execute(stmt).scalars().all())
-        for c in chunks:
-            db.delete(c)
-        db.commit()
-        return {"deleted_chunks": len(chunks)}
-    finally:
-        db.close()
+    try:
+        if req.delete_all:
+            result = delete_all_material(sid, delete_physical_files=False)
+            return {"deleted_chunks": result["deleted_chunks"]}
+        result = delete_source_file(
+            sid,
+            req.source_file,
+            delete_physical_file=False,
+        )
+        return {"deleted_chunks": result["deleted_chunks"]}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
