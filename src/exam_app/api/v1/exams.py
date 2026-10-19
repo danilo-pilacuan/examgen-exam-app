@@ -12,7 +12,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
-from core.domain.models import Subject, MaterialChunk
+from core.domain.auth import get_current_user, get_db
+from core.domain.models import Subject, MaterialChunk, User
 from core.infrastructure.db.connection import SessionLocal
 
 from exam_app.schemas.bank import MaterialChunkOut, MaterialDeleteRequest
@@ -20,26 +21,39 @@ from exam_app.schemas.bank import MaterialChunkOut, MaterialDeleteRequest
 router = APIRouter(tags=["exams-material"])
 
 
-# ---------------------------------------------------------------------------
-# Exams
-# ---------------------------------------------------------------------------
-@router.get("/subjects/{subject_id}/exams")
-def list_subject_exams(subject_id: str):
-    """Lists the generated exams of a subject.
-
-    Exams are detected by the PDFs in the output directory (shared with the
-    latex-compiler). Grouped by timestamp of the name.
-    """
+def _get_owned_subject(subject_id: str, user: User) -> uuid.UUID:
+    """Resolves a subject the user may access; returns its UUID."""
     try:
         sid = uuid.UUID(subject_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid subject_id")
-
     db = SessionLocal()
     try:
         subject = db.get(Subject, sid)
         if subject is None:
             raise HTTPException(status_code=404, detail="Subject not found")
+        if subject.owner_id is not None and subject.owner_id != user.id:
+            raise HTTPException(status_code=403, detail="Subject belongs to another professor")
+    finally:
+        db.close()
+    return sid
+
+
+# ---------------------------------------------------------------------------
+# Exams
+# ---------------------------------------------------------------------------
+@router.get("/subjects/{subject_id}/exams")
+def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
+    """Lists the generated exams of a subject.
+
+    Exams are detected by the PDFs in the output directory (shared with the
+    latex-compiler). Grouped by timestamp of the name.
+    """
+    sid = _get_owned_subject(subject_id, user)
+
+    db = SessionLocal()
+    try:
+        subject = db.get(Subject, sid)
     finally:
         db.close()
 
@@ -88,18 +102,13 @@ def list_subject_material(
     subject_id: str,
     source_file: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
+    user: User = Depends(get_current_user),
 ):
     """Lists the indexed material chunks of a subject."""
-    try:
-        sid = uuid.UUID(subject_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid subject_id")
+    sid = _get_owned_subject(subject_id, user)
 
     db = SessionLocal()
     try:
-        if db.get(Subject, sid) is None:
-            raise HTTPException(status_code=404, detail="Subject not found")
-
         stmt = (
             select(MaterialChunk)
             .where(MaterialChunk.subject_id == sid)
@@ -124,12 +133,13 @@ def list_subject_material(
 
 
 @router.delete("/subjects/{subject_id}/material")
-def delete_subject_material(subject_id: str, req: MaterialDeleteRequest):
+def delete_subject_material(
+    subject_id: str,
+    req: MaterialDeleteRequest,
+    user: User = Depends(get_current_user),
+):
     """Deletes indexed material (by source or all of the subject)."""
-    try:
-        sid = uuid.UUID(subject_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid subject_id")
+    sid = _get_owned_subject(subject_id, user)
 
     if not req.delete_all and not req.source_file:
         raise HTTPException(
@@ -139,9 +149,6 @@ def delete_subject_material(subject_id: str, req: MaterialDeleteRequest):
 
     db = SessionLocal()
     try:
-        if db.get(Subject, sid) is None:
-            raise HTTPException(status_code=404, detail="Subject not found")
-
         stmt = select(MaterialChunk).where(MaterialChunk.subject_id == sid)
         if req.source_file:
             stmt = stmt.where(MaterialChunk.source_file == req.source_file)

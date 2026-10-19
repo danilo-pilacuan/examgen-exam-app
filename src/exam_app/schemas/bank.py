@@ -104,6 +104,41 @@ class MaterialDeleteRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+class UserOut(BaseModel):
+    """Authenticated user (GET /auth/me)."""
+
+    id: str
+    email: str
+    name: str
+    role: str
+
+
+class RegisterRequest(BaseModel):
+    """Body of POST /auth/register."""
+
+    email: str = Field(..., min_length=3, max_length=255)
+    name: str = Field(..., min_length=1, max_length=200)
+    password: str = Field(..., min_length=6, max_length=200)
+
+
+class LoginRequest(BaseModel):
+    """Body of POST /auth/login."""
+
+    email: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    """Response of POST /auth/login and POST /auth/register."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def to_uuid(value: str) -> uuid.UUID:

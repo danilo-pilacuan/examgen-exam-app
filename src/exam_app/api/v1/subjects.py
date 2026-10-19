@@ -14,9 +14,12 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
+from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy import select
 
-from core.domain.models import Subject, GeneratedQuestion
+from core.domain.auth import get_current_user, get_db
+from core.domain.models import Subject, GeneratedQuestion, User
 from core.domain.bank.service import (
     SecurityError,
     list_questions,
@@ -36,39 +39,70 @@ from exam_app.schemas.bank import (
 router = APIRouter(tags=["subjects"])
 
 
+def _get_owned_subject(db: OrmSession, subject_id: str, user: User) -> Subject:
+    """Resolves a subject the user may access (own or legacy/shared)."""
+    try:
+        sid = uuid.UUID(subject_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid subject_id")
+    subject = db.get(Subject, sid)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    if subject.owner_id is not None and subject.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Subject belongs to another professor")
+    return subject
+
+
 # ---------------------------------------------------------------------------
 # Subjects
 # ---------------------------------------------------------------------------
 @router.get("/subjects", response_model=list[SubjectOut])
-def list_subjects():
-    """Lists registered subjects."""
-    db = SessionLocal()
-    try:
-        subjects = db.query(Subject).order_by(Subject.name).all()
-        return [
-            SubjectOut(id=str(s.id), name=s.name)
-            for s in subjects
-        ]
-    finally:
-        db.close()
+def list_subjects(
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """Lists the subjects of the authenticated professor.
+
+    Includes legacy/shared subjects (owner_id IS NULL) so existing data
+    keeps working after the multi-tenant migration.
+    """
+    subjects = (
+        db.query(Subject)
+        .filter(or_(Subject.owner_id == user.id, Subject.owner_id.is_(None)))
+        .order_by(Subject.name)
+        .all()
+    )
+    return [
+        SubjectOut(id=str(s.id), name=s.name)
+        for s in subjects
+    ]
 
 
 @router.post("/subjects", response_model=SubjectOut)
-def create_subject(req: SubjectCreate):
-    """Registers a subject (or returns the existing one, without duplicating)."""
-    db = SessionLocal()
-    try:
-        subject = (
-            db.query(Subject).filter(Subject.name.ilike(req.name)).first()
+def create_subject(
+    req: SubjectCreate,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """Registers a subject owned by the authenticated professor.
+
+    Returns the existing one (without duplicating) if the professor already
+    has a subject with that name.
+    """
+    subject = (
+        db.query(Subject)
+        .filter(
+            Subject.name.ilike(req.name),
+            or_(Subject.owner_id == user.id, Subject.owner_id.is_(None)),
         )
-        if subject is None:
-            subject = Subject(name=req.name)
-            db.add(subject)
-            db.commit()
-            db.refresh(subject)
-        return SubjectOut(id=str(subject.id), name=subject.name)
-    finally:
-        db.close()
+        .first()
+    )
+    if subject is None:
+        subject = Subject(name=req.name, owner_id=user.id)
+        db.add(subject)
+        db.commit()
+        db.refresh(subject)
+    return SubjectOut(id=str(subject.id), name=subject.name)
 
 
 # ---------------------------------------------------------------------------
@@ -83,20 +117,12 @@ def list_subject_questions(
     question_type: str | None = Query(default=None),
     verified: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
 ):
     """Lists the questions of a subject's bank (with optional filters)."""
-    # Validar UUID
-    try:
-        sid = uuid.UUID(subject_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid subject_id")
-
-    db = SessionLocal()
-    try:
-        if db.get(Subject, sid) is None:
-            raise HTTPException(status_code=404, detail="Subject not found")
-    finally:
-        db.close()
+    subject = _get_owned_subject(db, subject_id, user)
+    sid = subject.id
 
     # Filters supported by the service layer.
     verified_by_human: bool | None = None
@@ -150,7 +176,12 @@ def list_subject_questions(
 
 
 @router.put("/questions/{question_id}/verification", response_model=QuestionOut)
-def set_question_verification(question_id: str, req: VerificationRequest):
+def set_question_verification(
+    question_id: str,
+    req: VerificationRequest,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
     """Marks/unmarks the human verification of a question (HITL).
 
     ⚠️ Felipe's requirement: a human-verified question is immutable for the
@@ -160,6 +191,11 @@ def set_question_verification(question_id: str, req: VerificationRequest):
         qid = uuid.UUID(question_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid question_id")
+
+    q = db.get(GeneratedQuestion, qid)
+    if q is None:
+        raise HTTPException(status_code=404, detail="Question not found")
+    _get_owned_subject(db, str(q.subject_id), user)
 
     q = set_human_verification(qid, verified=req.verified)
     return QuestionOut(
@@ -185,12 +221,22 @@ def set_question_verification(question_id: str, req: VerificationRequest):
 
 
 @router.delete("/questions/{question_id}")
-def delete_question_endpoint(question_id: str):
+def delete_question_endpoint(
+    question_id: str,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
     """Deletes a question (blocked if verified by a human)."""
     try:
         qid = uuid.UUID(question_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid question_id")
+
+    q = db.get(GeneratedQuestion, qid)
+    if q is None:
+        raise HTTPException(status_code=404, detail="Question not found")
+    _get_owned_subject(db, str(q.subject_id), user)
+
     try:
         delete_question(qid)
     except SecurityError as e:

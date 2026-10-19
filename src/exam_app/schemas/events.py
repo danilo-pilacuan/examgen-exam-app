@@ -24,6 +24,7 @@ EventType = Literal[
     "material_indexed",
     "question_saved",
     "subject_registered",
+    "subject_selected",
     "cancelled",
     "done",
     "error",

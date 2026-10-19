@@ -36,6 +36,7 @@ from exam_app.api.v1.files import router as files_router  # noqa: E402
 from exam_app.api.v1.legacy_openai import router as chat_router  # noqa: E402
 from exam_app.api.v1.subjects import router as subjects_router  # noqa: E402
 from exam_app.api.v1.exams import router as exams_material_router  # noqa: E402
+from exam_app.api.v1.auth import router as auth_router  # noqa: E402
 from exam_app.api.v1.ws import router as ws_router  # noqa: E402
 from exam_app.core.config import settings as app_settings  # noqa: E402
 from exam_app.core.lifespan import lifespan  # noqa: E402
@@ -60,6 +61,8 @@ app.include_router(ws_router)
 # REST routers for subjects, bank, exams and material (stage 5).
 app.include_router(subjects_router)
 app.include_router(exams_material_router)
+# Auth: professor accounts and JWT sessions (multi-tenant).
+app.include_router(auth_router)
 
 # Output directory for PDFs (shared with latex-compiler via volume).
 # In the container it is mounted at /app/output; locally it is data/agent_outputs.

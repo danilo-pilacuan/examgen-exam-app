@@ -16,6 +16,9 @@ class ChatRequest(BaseModel):
     thread_id: str | None = Field(default=None, description="Conversation ID (new if omitted)")
     subject_id: str | None = None
     subject_name: str | None = None
+    # Bearer JWT (SSE POST cannot always send an Authorization header from
+    # the browser client; the token travels in the body instead).
+    token: str | None = Field(default=None, description="JWT access token")
 
 
 class ChatResponse(BaseModel):
