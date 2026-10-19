@@ -48,98 +48,102 @@ def _get_owned_subject(subject_id: str, user: User) -> uuid.UUID:
 def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
     """Lists the generated exams of a subject.
 
-    Exams are detected by the PDFs in the output directory (shared with the
-    latex-compiler). Grouped by prefix of the name (the compiler names each
-    PDF `<job_id>.pdf`; multi-version exams share the prefix before `_vN`).
-
-    Enrichment: when a sibling `exam_<pdf-stem>.json` exists (stage 9 raw
-    artifact), its blueprint/items/created_at are used to fill the record.
+    Primary source: the `exams` table (every generation is persisted with
+    its blueprint, items and artifact names). Legacy exams (PDFs in the
+    output directory without a DB row) are listed from the files.
     """
     sid = _get_owned_subject(subject_id, user)
 
     db = SessionLocal()
     try:
         subject = db.get(Subject, sid)
+        if subject is None:
+            raise HTTPException(status_code=404, detail="Subject not found")
+
+        from core.domain.models import Exam as ExamModel
+
+        rows = (
+            db.query(ExamModel)
+            .filter(ExamModel.subject_id == sid)
+            .order_by(ExamModel.created_at.desc())
+            .all()
+        )
+        exams = [
+            {
+                "id": str(row.id),
+                "subject_id": str(row.subject_id),
+                "subject_name": subject.name,
+                "name": row.name,
+                "blueprint": row.blueprint or {},
+                "items": row.items or [],
+                "num_versions": row.num_versions,
+                "pdf_paths": row.pdf_paths or [],
+                "zip_path": row.zip_path,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+
+        # Legacy exams: PDFs in the output directory without a DB row.
+        from core.infrastructure.files.output_paths import get_output_dir
+        from pathlib import Path
+
+        output_dir = get_output_dir()
+        if output_dir.exists():
+            persisted_pdfs = {p for e in exams for p in e["pdf_paths"]}
+            exams_by_prefix: dict[str, list[Path]] = {}
+            for pdf in sorted(output_dir.glob("*.pdf")):
+                if pdf.name in persisted_pdfs:
+                    continue
+                name = pdf.name
+                parts = name.rsplit("_v", 1)
+                if len(parts) == 2 and parts[1].split(".")[0].isdigit():
+                    prefix = parts[0]
+                else:
+                    prefix = name.rsplit(".", 1)[0]
+                exams_by_prefix.setdefault(prefix, []).append(pdf)
+
+            for prefix, pdfs in sorted(exams_by_prefix.items(), reverse=True):
+                pdfs.sort()
+                record = {
+                    "id": prefix,
+                    "subject_id": subject_id,
+                    "subject_name": subject.name,
+                    "name": prefix,
+                    "blueprint": {},
+                    "items": [],
+                    "num_versions": 1,
+                    "pdf_paths": [p.name for p in pdfs],
+                    "zip_path": None,
+                    "created_at": None,
+                }
+                # Enrich from a raw JSON artifact when it exists.
+                json_path = output_dir / f"{prefix}.json"
+                if not json_path.exists():
+                    json_path = output_dir / f"exam_{prefix}.json"
+                if json_path.exists():
+                    try:
+                        raw = json.loads(json_path.read_text(encoding="utf-8"))
+                        record["blueprint"] = raw.get("blueprint") or {}
+                        record["items"] = raw.get("items") or []
+                        record["created_at"] = raw.get("generated_at")
+                    except (OSError, ValueError):
+                        pass
+                if record["created_at"] is None:
+                    first_pdf = next((p for p in pdfs if p.exists()), None)
+                    if first_pdf is not None:
+                        record["created_at"] = datetime.fromtimestamp(
+                            first_pdf.stat().st_mtime, tz=timezone.utc
+                        ).isoformat()
+                zip_path = output_dir / f"exam_{prefix}.zip"
+                if zip_path.exists():
+                    record["zip_path"] = zip_path.name
+                exams.append(record)
+
+        exams.sort(key=lambda e: e["created_at"] or "", reverse=True)
+        return exams
     finally:
         db.close()
-
-    from core.infrastructure.files.output_paths import get_output_dir
-    from pathlib import Path
-
-    output_dir = get_output_dir()
-    if not output_dir.exists():
-        return []
-
-    # Group PDFs into exams. Two sources of truth:
-    #   1. `exam_<id>.zip` packages (stage 9): every PDF inside belongs to
-    #      one exam; the ZIP name defines the exam id.
-    #   2. Loose PDFs (legacy exams): grouped by prefix before `_vN`.
-    exams_by_prefix: dict[str, list[Path]] = {}
-    grouped_pdfs: set[str] = set()
-    for zip_file in sorted(output_dir.glob("exam_*.zip")):
-        exam_id = zip_file.stem.removeprefix("exam_")
-        try:
-            import zipfile as _zipfile
-
-            with _zipfile.ZipFile(zip_file) as zf:
-                names = [n for n in zf.namelist() if n.lower().endswith(".pdf")]
-            if names:
-                exams_by_prefix[exam_id] = [
-                    # Virtual entries: the PDFs live inside the ZIP.
-                    Path(zip_file.parent / n) for n in sorted(names)
-                ]
-                grouped_pdfs.update(names)
-        except (OSError, _zipfile.BadZipFile):
-            continue
-    for pdf in sorted(output_dir.glob("*.pdf")):
-        if pdf.name in grouped_pdfs:
-            continue
-        name = pdf.name
-        # Extract the timestamp (last part before _vN)
-        parts = name.rsplit("_v", 1)
-        if len(parts) == 2 and parts[1].split(".")[0].isdigit():
-            prefix = parts[0]
-        else:
-            prefix = name.rsplit(".", 1)[0]
-        exams_by_prefix.setdefault(prefix, []).append(pdf)
-
-    exams = []
-    for prefix, pdfs in sorted(exams_by_prefix.items(), reverse=True):
-        pdfs.sort()
-        record = {
-            "id": prefix,
-            "subject_id": subject_id,
-            "subject_name": subject.name,
-            "blueprint": {},
-            "items": [],
-            "pdf_paths": [p.name for p in pdfs],
-            "zip_path": None,
-            "created_at": None,
-        }
-        # Enrich from the stage-9 raw JSON artifact when it exists.
-        json_path = output_dir / f"exam_{prefix}.json"
-        if json_path.exists():
-            try:
-                raw = json.loads(json_path.read_text(encoding="utf-8"))
-                record["blueprint"] = raw.get("blueprint") or {}
-                record["items"] = raw.get("items") or []
-                record["created_at"] = raw.get("generated_at")
-            except (OSError, ValueError):
-                pass
-        if record["created_at"] is None:
-            first_pdf = next((p for p in pdfs if p.exists()), None)
-            if first_pdf is not None:
-                record["created_at"] = datetime.fromtimestamp(
-                    first_pdf.stat().st_mtime, tz=timezone.utc
-                ).isoformat()
-        # ZIP package (all versions, with/without answers) when it exists.
-        zip_path = output_dir / f"exam_{prefix}.zip"
-        if zip_path.exists():
-            record["zip_path"] = zip_path.name
-        exams.append(record)
-    # Newest first (the file names are UUIDs, not sortable by date).
-    exams.sort(key=lambda e: e["created_at"] or "", reverse=True)
-    return exams
 
 
 # ---------------------------------------------------------------------------
