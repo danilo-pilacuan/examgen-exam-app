@@ -70,10 +70,30 @@ def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
     if not output_dir.exists():
         return []
 
-    # Group PDFs by prefix (timestamp) — naming convention of the
-    # latex-compiler: examen_<subject>_<timestamp>_v<N>.pdf
+    # Group PDFs into exams. Two sources of truth:
+    #   1. `exam_<id>.zip` packages (stage 9): every PDF inside belongs to
+    #      one exam; the ZIP name defines the exam id.
+    #   2. Loose PDFs (legacy exams): grouped by prefix before `_vN`.
     exams_by_prefix: dict[str, list[Path]] = {}
+    grouped_pdfs: set[str] = set()
+    for zip_file in sorted(output_dir.glob("exam_*.zip")):
+        exam_id = zip_file.stem.removeprefix("exam_")
+        try:
+            import zipfile as _zipfile
+
+            with _zipfile.ZipFile(zip_file) as zf:
+                names = [n for n in zf.namelist() if n.lower().endswith(".pdf")]
+            if names:
+                exams_by_prefix[exam_id] = [
+                    # Virtual entries: the PDFs live inside the ZIP.
+                    Path(zip_file.parent / n) for n in sorted(names)
+                ]
+                grouped_pdfs.update(names)
+        except (OSError, _zipfile.BadZipFile):
+            continue
     for pdf in sorted(output_dir.glob("*.pdf")):
+        if pdf.name in grouped_pdfs:
+            continue
         name = pdf.name
         # Extract the timestamp (last part before _vN)
         parts = name.rsplit("_v", 1)
@@ -93,10 +113,11 @@ def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
             "blueprint": {},
             "items": [],
             "pdf_paths": [p.name for p in pdfs],
+            "zip_path": None,
             "created_at": None,
         }
         # Enrich from the stage-9 raw JSON artifact when it exists.
-        json_path = output_dir / f"exam_{pdfs[0].stem}.json"
+        json_path = output_dir / f"exam_{prefix}.json"
         if json_path.exists():
             try:
                 raw = json.loads(json_path.read_text(encoding="utf-8"))
@@ -106,9 +127,15 @@ def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
             except (OSError, ValueError):
                 pass
         if record["created_at"] is None:
-            record["created_at"] = datetime.fromtimestamp(
-                pdfs[0].stat().st_mtime, tz=timezone.utc
-            ).isoformat()
+            first_pdf = next((p for p in pdfs if p.exists()), None)
+            if first_pdf is not None:
+                record["created_at"] = datetime.fromtimestamp(
+                    first_pdf.stat().st_mtime, tz=timezone.utc
+                ).isoformat()
+        # ZIP package (all versions, with/without answers) when it exists.
+        zip_path = output_dir / f"exam_{prefix}.zip"
+        if zip_path.exists():
+            record["zip_path"] = zip_path.name
         exams.append(record)
     # Newest first (the file names are UUIDs, not sortable by date).
     exams.sort(key=lambda e: e["created_at"] or "", reverse=True)

@@ -71,12 +71,13 @@ from core.infrastructure.files.output_paths import get_output_dir  # noqa: E402
 OUTPUT_DIR = get_output_dir()
 
 
-# File types servable by GET /output (exam PDFs, exports and exam JSON).
+# File types servable by GET /output (exam PDFs, exports, exam JSON, ZIP).
 _ALLOWED_OUTPUT_MIME = {
     ".pdf": "application/pdf",
     ".csv": "text/csv",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".json": "application/json",
+    ".zip": "application/zip",
 }
 
 
