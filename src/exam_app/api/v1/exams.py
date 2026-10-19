@@ -7,7 +7,9 @@
 """
 from __future__ import annotations
 
+import json
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -47,7 +49,11 @@ def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
     """Lists the generated exams of a subject.
 
     Exams are detected by the PDFs in the output directory (shared with the
-    latex-compiler). Grouped by timestamp of the name.
+    latex-compiler). Grouped by prefix of the name (the compiler names each
+    PDF `<job_id>.pdf`; multi-version exams share the prefix before `_vN`).
+
+    Enrichment: when a sibling `exam_<pdf-stem>.json` exists (stage 9 raw
+    artifact), its blueprint/items/created_at are used to fill the record.
     """
     sid = _get_owned_subject(subject_id, user)
 
@@ -80,17 +86,32 @@ def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
     exams = []
     for prefix, pdfs in sorted(exams_by_prefix.items(), reverse=True):
         pdfs.sort()
-        exams.append(
-            {
-                "id": prefix,
-                "subject_id": subject_id,
-                "subject_name": subject.name,
-                "blueprint": {},
-                "items": [],
-                "pdf_paths": [p.name for p in pdfs],
-                "created_at": None,
-            }
-        )
+        record = {
+            "id": prefix,
+            "subject_id": subject_id,
+            "subject_name": subject.name,
+            "blueprint": {},
+            "items": [],
+            "pdf_paths": [p.name for p in pdfs],
+            "created_at": None,
+        }
+        # Enrich from the stage-9 raw JSON artifact when it exists.
+        json_path = output_dir / f"exam_{pdfs[0].stem}.json"
+        if json_path.exists():
+            try:
+                raw = json.loads(json_path.read_text(encoding="utf-8"))
+                record["blueprint"] = raw.get("blueprint") or {}
+                record["items"] = raw.get("items") or []
+                record["created_at"] = raw.get("generated_at")
+            except (OSError, ValueError):
+                pass
+        if record["created_at"] is None:
+            record["created_at"] = datetime.fromtimestamp(
+                pdfs[0].stat().st_mtime, tz=timezone.utc
+            ).isoformat()
+        exams.append(record)
+    # Newest first (the file names are UUIDs, not sortable by date).
+    exams.sort(key=lambda e: e["created_at"] or "", reverse=True)
     return exams
 
 
