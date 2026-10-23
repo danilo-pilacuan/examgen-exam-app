@@ -30,6 +30,11 @@ def get_chat_service() -> ChatService:
     return ChatService(get_chat_engine(), get_event_bus())
 
 
+def get_chat_service_sync() -> ChatService:
+    """Non-Depends accessor (used by endpoints that don't need DI)."""
+    return get_chat_service()
+
+
 @lru_cache
 def get_file_service() -> FileServicePort:
     from exam_app.infrastructure.local_file_service import LocalFileService

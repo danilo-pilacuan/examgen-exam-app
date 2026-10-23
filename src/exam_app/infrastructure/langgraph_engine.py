@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Union
 
 from agents_backend.conversational.graph import conversational_graph
 from agents_backend.shared.events import (
@@ -54,7 +54,7 @@ class LangGraphEngine:
         thread_id: str,
         subject_id: str | None = None,
         subject_name: str | None = None,
-    ) -> AsyncIterator[SSEEvent]:
+    ) -> AsyncIterator[Union[SSEEvent, str]]:
         """Runs the turn in a thread and streams events through the bus.
 
         The execution thread publishes to `self._bus`; this generator consumes
@@ -80,12 +80,18 @@ class LangGraphEngine:
         # Consume the agent events while the turn runs.
         subscription = agent_bus.subscribe(thread_id)
         done = False
+        ticks = 0
+        # SSE heartbeat: emit a comment frame every ~15s while nothing else
+        # is sent, so proxies (nginx default read timeout is 60s) and the
+        # browser know the stream is alive during long LLM/pipeline work.
+        PING_EVERY_TICKS = 300  # 300 * 0.05s = 15s
         while not done:
             # Typed agent events (best-effort: if none, keep going).
             try:
                 agent_event: AgentEvent = await asyncio.wait_for(
                     subscription.__anext__(), timeout=0.05
                 )
+                ticks = 0
                 yield SSEEvent(
                     type=agent_event.type.value,  # type: ignore[arg-type]
                     thread_id=thread_id,
@@ -99,6 +105,12 @@ class LangGraphEngine:
             if task.done():
                 done = True
                 break
+
+            ticks += 1
+            if ticks >= PING_EVERY_TICKS:
+                ticks = 0
+                # SSE comment frame: ignored by parsers, keeps the connection warm.
+                yield ": ping\n\n"
             await asyncio.sleep(0.02)
 
         # Final result: single token with the content (real token streaming
@@ -158,6 +170,49 @@ class LangGraphEngine:
         if messages:
             content = getattr(messages[-1], "content", "") or ""
         return {"thread_id": thread_id, "content": content}
+
+    # ------------------------------------------------------------------
+    def history(self, thread_id: str) -> list[dict]:
+        """Persisted messages of a thread, read from the checkpointer.
+
+        Returns a list of {role, content} dicts (user/assistant only),
+        oldest first. Empty list when the thread does not exist.
+        """
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        try:
+            state = conversational_graph.get_state(
+                {"configurable": {"thread_id": thread_id}}
+            )
+        except Exception:  # noqa: BLE001
+            return []
+
+        values = getattr(state, "values", None) or {}
+        raw_messages = values.get("messages") or []
+        out: list[dict] = []
+        for msg in raw_messages:
+            content = getattr(msg, "content", None)
+            if content is None and isinstance(msg, dict):
+                content = msg.get("content")
+            if not content:
+                continue
+            if isinstance(content, list):
+                # Multimodal content blocks: keep only the text parts.
+                content = " ".join(
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("text")
+                ).strip()
+            if not content:
+                continue
+            if isinstance(msg, HumanMessage) or getattr(msg, "type", None) == "human":
+                role = "user"
+            elif isinstance(msg, AIMessage) or getattr(msg, "type", None) == "ai":
+                role = "assistant"
+            else:
+                continue  # system/tool messages are not shown in the chat
+            out.append({"role": role, "content": content})
+        return out
 
     # ------------------------------------------------------------------
     def cancel(self, thread_id: str) -> None:

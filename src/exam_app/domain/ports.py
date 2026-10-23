@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, Union
 
 from exam_app.schemas.events import SSEEvent
 
@@ -33,8 +33,11 @@ class ChatEnginePort(Protocol):
         thread_id: str,
         subject_id: str | None = None,
         subject_name: str | None = None,
-    ) -> AsyncIterator[SSEEvent]:
-        """Runs a turn and emits SSE events (tokens + typed events)."""
+    ) -> AsyncIterator[Union[SSEEvent, str]]:
+        """Runs a turn and emits SSE events (tokens + typed events).
+
+        Raw `str` items are pre-formatted SSE frames (heartbeat comments).
+        """
         ...
 
     async def invoke(

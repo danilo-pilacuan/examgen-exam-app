@@ -6,6 +6,7 @@ directly).
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Union
 
 from exam_app.domain.ports import ChatEnginePort
 from exam_app.schemas.events import SSEEvent
@@ -25,7 +26,7 @@ class ChatService:
         thread_id: str,
         subject_id: str | None = None,
         subject_name: str | None = None,
-    ) -> AsyncIterator[SSEEvent]:
+    ) -> AsyncIterator[Union[SSEEvent, str]]:
         self._bus.clear_cancel(thread_id)
         async for event in self._engine.stream(
             message, thread_id, subject_id, subject_name
@@ -43,3 +44,10 @@ class ChatService:
 
     def cancel(self, thread_id: str) -> None:
         self._engine.cancel(thread_id)
+
+    def history(self, thread_id: str) -> list[dict]:
+        """Persisted messages of a thread (from the checkpointer)."""
+        history = getattr(self._engine, "history", None)
+        if history is None:
+            return []
+        return history(thread_id)

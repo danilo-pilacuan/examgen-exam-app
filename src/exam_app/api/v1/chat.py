@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as OrmSession
 
-from core.domain.auth import decode_token, get_db
+from core.domain.auth import decode_token, get_current_user, get_db
 from core.domain.models import Subject, User
 
 from exam_app.api.deps import get_chat_service
@@ -71,7 +71,8 @@ async def chat_stream(
         async for event in service.stream(
             req.message, thread_id, req.subject_id, req.subject_name
         ):
-            yield event.to_sse()
+            # Raw strings are pre-formatted SSE frames (heartbeat comments).
+            yield event if isinstance(event, str) else event.to_sse()
 
     return StreamingResponse(
         event_stream(),
@@ -82,6 +83,23 @@ async def chat_stream(
             "X-Thread-Id": thread_id,
         },
     )
+
+
+@router.get("/history/{thread_id}")
+def chat_history(thread_id: str, user: User = Depends(get_current_user)):
+    """Returns the persisted messages of a conversation thread.
+
+    Reads the LangGraph checkpointer state (PostgresSaver), so a
+    conversation survives logout/login and browser restarts.
+    """
+    if not thread_id or len(thread_id) > 128:
+        raise HTTPException(status_code=400, detail="Invalid thread_id")
+
+    from exam_app.api.deps import get_chat_service_sync
+
+    service = get_chat_service_sync()
+    messages = service.history(thread_id)
+    return {"thread_id": thread_id, "messages": messages}
 
 
 @router.post("", response_model=ChatResponse)

@@ -85,31 +85,39 @@ def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
         ]
 
         # Legacy exams: PDFs in the output directory without a DB row.
+        # They are grouped by EXAM BASE NAME (one record per exam, not per
+        # PDF): "<base>_A.pdf", "<base>_A_respondido.pdf", "<base>_B.pdf"
+        # and "<base>_v1_with_answers.pdf" all belong to the same exam.
         from core.infrastructure.files.output_paths import get_output_dir
         from pathlib import Path
+        import re
 
         output_dir = get_output_dir()
         if output_dir.exists():
             persisted_pdfs = {p for e in exams for p in e["pdf_paths"]}
-            exams_by_prefix: dict[str, list[Path]] = {}
+            exams_by_base: dict[str, list[Path]] = {}
             for pdf in sorted(output_dir.glob("*.pdf")):
                 if pdf.name in persisted_pdfs:
                     continue
-                name = pdf.name
-                parts = name.rsplit("_v", 1)
-                if len(parts) == 2 and parts[1].split(".")[0].isdigit():
-                    prefix = parts[0]
-                else:
-                    prefix = name.rsplit(".", 1)[0]
-                exams_by_prefix.setdefault(prefix, []).append(pdf)
+                stem = pdf.stem
+                # Strip version/variant suffixes to get the exam base name:
+                #   <base>_A_respondido -> <base>
+                #   <base>_A            -> <base>
+                #   <base>_v1_with_answers -> <base>
+                #   <base>_v2           -> <base>
+                stem = re.sub(r"_respondido$", "", stem)
+                stem = re.sub(r"_with_answers$", "", stem)
+                stem = re.sub(r"_v\d+$", "", stem)
+                stem = re.sub(r"_[A-J]$", "", stem)
+                exams_by_base.setdefault(stem, []).append(pdf)
 
-            for prefix, pdfs in sorted(exams_by_prefix.items(), reverse=True):
+            for base, pdfs in sorted(exams_by_base.items(), reverse=True):
                 pdfs.sort()
                 record = {
-                    "id": prefix,
+                    "id": base,
                     "subject_id": subject_id,
                     "subject_name": subject.name,
-                    "name": prefix,
+                    "name": base,
                     "blueprint": {},
                     "items": [],
                     "num_versions": 1,
@@ -118,9 +126,9 @@ def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
                     "created_at": None,
                 }
                 # Enrich from a raw JSON artifact when it exists.
-                json_path = output_dir / f"{prefix}.json"
+                json_path = output_dir / f"{base}.json"
                 if not json_path.exists():
-                    json_path = output_dir / f"exam_{prefix}.json"
+                    json_path = output_dir / f"exam_{base}.json"
                 if json_path.exists():
                     try:
                         raw = json.loads(json_path.read_text(encoding="utf-8"))
@@ -135,9 +143,17 @@ def list_subject_exams(subject_id: str, user: User = Depends(get_current_user)):
                         record["created_at"] = datetime.fromtimestamp(
                             first_pdf.stat().st_mtime, tz=timezone.utc
                         ).isoformat()
-                zip_path = output_dir / f"exam_{prefix}.zip"
-                if zip_path.exists():
-                    record["zip_path"] = zip_path.name
+                # The ZIP of the exam (any of the known naming variants).
+                for zip_name in (f"{base}.zip", f"exam_{base}.zip"):
+                    if (output_dir / zip_name).exists():
+                        record["zip_path"] = zip_name
+                        break
+                # Skip orphaned legacy artifacts: PDFs from pre-persistence
+                # runs with no JSON metadata and no ZIP. They carry no
+                # identifiable exam content (UUID-only names) and would
+                # otherwise flood the list with one record per PDF.
+                if record["zip_path"] is None and not record["items"]:
+                    continue
                 exams.append(record)
 
         exams.sort(key=lambda e: e["created_at"] or "", reverse=True)
