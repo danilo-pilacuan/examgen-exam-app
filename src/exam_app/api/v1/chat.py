@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as OrmSession
 
@@ -24,12 +24,22 @@ from exam_app.services.chat_engine import ChatService
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
-def _resolve_user(req: ChatRequest, db: OrmSession) -> User:
-    """Resolves the authenticated user from the body token (or 401)."""
-    if not req.token:
+def _resolve_user(req: ChatRequest, db: OrmSession, request: Request | None = None) -> User:
+    """Resolves the authenticated user from the body token (or 401).
+
+    The body token is the primary source (SSE clients cannot always send
+    headers); the `Authorization: Bearer` header is accepted as a fallback
+    for REST callers (`apiFetch` always injects it).
+    """
+    token = req.token
+    if not token and request is not None:
+        auth_header = request.headers.get("Authorization") or ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[len("Bearer "):].strip() or None
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
-        payload = decode_token(req.token)
+        payload = decode_token(token)
     except Exception as e:  # AuthError / jwt errors
         raise HTTPException(status_code=401, detail=str(e)) from e
     user_id = payload.get("sub")
@@ -59,11 +69,12 @@ def _check_subject_access(db: OrmSession, user: User, subject_id: str | None) ->
 @router.post("/stream")
 async def chat_stream(
     req: ChatRequest,
+    request: Request,
     service: ChatService = Depends(get_chat_service),
     db: OrmSession = Depends(get_db),
 ):
     """Chat with SSE streaming: tokens + typed tool events."""
-    user = _resolve_user(req, db)
+    user = _resolve_user(req, db, request)
     _check_subject_access(db, user, req.subject_id)
     thread_id = req.thread_id or str(uuid.uuid4())
 
@@ -105,11 +116,12 @@ def chat_history(thread_id: str, user: User = Depends(get_current_user)):
 @router.post("", response_model=ChatResponse)
 async def chat_invoke(
     req: ChatRequest,
+    request: Request,
     service: ChatService = Depends(get_chat_service),
     db: OrmSession = Depends(get_db),
 ):
     """Chat without streaming (a full turn)."""
-    user = _resolve_user(req, db)
+    user = _resolve_user(req, db, request)
     _check_subject_access(db, user, req.subject_id)
     thread_id = req.thread_id or str(uuid.uuid4())
     result = await service.invoke(

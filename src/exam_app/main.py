@@ -81,9 +81,12 @@ _ALLOWED_OUTPUT_MIME = {
 }
 
 
-@app.get("/output/{filename}")
+@app.api_route("/output/{filename}", methods=["GET", "HEAD"])
 def download_output(filename: str):
-    """Serves a generated file (exam PDF, CSV/XLSX export)."""
+    """Serves a generated file (exam PDF, CSV/XLSX export).
+
+    HEAD is supported for pre-flight checks (download managers, antivirus).
+    """
     # Prevent path traversal: only the base name of the file.
     safe = Path(filename).name
     file_path = OUTPUT_DIR / safe
