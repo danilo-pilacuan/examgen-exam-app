@@ -27,3 +27,21 @@ class ChatResponse(BaseModel):
     thread_id: str
     content: str
     pending_interrupt: dict | None = None
+
+
+class ThreadOut(BaseModel):
+    """Metadata of one conversation thread (sidebar list item)."""
+
+    thread_id: str
+    title: str
+    last_subject_id: str | None = None
+    last_subject_name: str | None = None
+    message_count: int = 0
+    created_at: str
+    updated_at: str
+
+
+class ThreadTitleRequest(BaseModel):
+    """Rename of a thread (pinned title, DEC-004 option a)."""
+
+    title: str = Field(..., min_length=1, max_length=200)
