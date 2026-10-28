@@ -52,6 +52,46 @@ class QuestionOut(BaseModel):
     created_at: str | None = None
 
 
+class BankExportQuestion(BaseModel):
+    """Question enriched with its generator LLM audit fields (bank export).
+
+    Correlation with `llm_responses` is by exact statement match against the
+    generator's raw answer JSON (`pipeline:generator` rows), mirroring how
+    the pipeline persists items (`statement` -> `question_text`).
+    """
+
+    id: str
+    topic: str
+    subtopic: str | None = None
+    bloom_level: str
+    difficulty: str
+    question_type: str | None = None
+    question_text: str
+    options: list[dict[str, Any]] | None = None
+    expected_answer: str | None = None
+    solution_explanation: str | None = None
+    points: float | None = None
+    verified_by_human: bool = False
+    verified_by_ai: bool = False
+    ai_review_notes: str | None = None
+    ai_review_priority: str | None = None
+    source: str | None = None
+    created_at: str | None = None
+    prompt: str | None = None
+    thinking: str | None = None
+    generation_model: str | None = None
+
+
+class BankExport(BaseModel):
+    """Downloadable question bank for one subject (GET /subjects/{id}/questions/export)."""
+
+    subject: str
+    exported_at: str
+    total_questions: int
+    thinking_capture_enabled: bool
+    questions: list[BankExportQuestion]
+
+
 class QuestionFilters(BaseModel):
     """Filters for bank listing (query params of GET /subjects/{id}/questions)."""
 

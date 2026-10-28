@@ -11,7 +11,9 @@ Bank write endpoints go through `core.domain.bank.service`
 """
 from __future__ import annotations
 
+import json
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
@@ -19,7 +21,8 @@ from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy import select
 
 from core.domain.auth import get_current_user, get_db
-from core.domain.models import Subject, GeneratedQuestion, User
+from core.domain.models import Subject, GeneratedQuestion, User, LLMResponse
+from core.config import settings
 from core.domain.bank.service import (
     SecurityError,
     list_questions,
@@ -29,6 +32,8 @@ from core.domain.bank.service import (
 from core.infrastructure.db.connection import SessionLocal
 
 from exam_app.schemas.bank import (
+    BankExport,
+    BankExportQuestion,
     QuestionFilters,
     QuestionOut,
     SubjectCreate,
@@ -37,6 +42,32 @@ from exam_app.schemas.bank import (
 )
 
 router = APIRouter(tags=["subjects"])
+
+
+def _build_export_question(q: GeneratedQuestion, prompt: str | None, thinking: str | None, model: str | None) -> BankExportQuestion:
+    """Maps one bank row to the export DTO with its LLM audit fields."""
+    return BankExportQuestion(
+        id=str(q.id),
+        topic=q.topic,
+        subtopic=q.subtopic,
+        bloom_level=q.bloom_level,
+        difficulty=q.difficulty,
+        question_type=q.question_type,
+        question_text=q.question_text,
+        options=q.options,
+        expected_answer=q.expected_answer,
+        solution_explanation=q.solution_explanation,
+        points=q.points,
+        verified_by_human=q.verified_by_human,
+        verified_by_ai=q.verified_by_ai,
+        ai_review_notes=q.ai_review_notes,
+        ai_review_priority=q.ai_review_priority,
+        source=q.source,
+        created_at=str(q.created_at) if q.created_at else None,
+        prompt=prompt,
+        thinking=thinking,
+        generation_model=model,
+    )
 
 
 def _get_owned_subject(db: OrmSession, subject_id: str, user: User) -> Subject:
@@ -173,6 +204,72 @@ def list_subject_questions(
         )
         for q in questions
     ]
+
+
+# ---------------------------------------------------------------------------
+# Bank export (download with LLM audit fields)
+# ---------------------------------------------------------------------------
+@router.get("/subjects/{subject_id}/questions/export", response_model=BankExport)
+def export_subject_bank(
+    subject_id: str,
+    user: User = Depends(get_current_user),
+    db: OrmSession = Depends(get_db),
+):
+    """Downloads the subject's question bank with prompt/thinking audit fields.
+
+    Correlation with `llm_responses`: the generator's raw answer is the item
+    JSON persisted by the pipeline (`statement` -> `question_text`), so each
+    question is matched by exact statement text against the most recent
+    `pipeline:generator` row. `thinking` is only present when thinking
+    capture was enabled at generation time (`llm_capture_thinking`).
+    """
+    subject = _get_owned_subject(db, subject_id, user)
+    sid = subject.id
+
+    questions = list_questions(subject_id=sid, limit=1000)
+
+    # Statement -> (prompt, thinking, model) from generator audit rows,
+    # newest first (the newest row wins on collision).
+    audit_by_statement: dict[str, tuple[str | None, str | None, str | None]] = {}
+    if questions:
+        audit_rows = (
+            db.query(LLMResponse)
+            .filter(LLMResponse.context == "pipeline:generator")
+            .order_by(LLMResponse.created_at.desc())
+            .all()
+        )
+        for row in audit_rows:
+            statement = _extract_statement(row.raw_answer)
+            if statement and statement not in audit_by_statement:
+                audit_by_statement[statement] = (row.prompt, row.raw_thinking, row.model)
+
+    export_questions = [
+        _build_export_question(q, *audit_by_statement.get(q.question_text or "", (None, None, None)))
+        for q in questions
+    ]
+
+    return BankExport(
+        subject=subject.name,
+        exported_at=datetime.now(timezone.utc).isoformat(),
+        total_questions=len(export_questions),
+        thinking_capture_enabled=bool(settings.llm_capture_thinking),
+        questions=export_questions,
+    )
+
+
+def _extract_statement(raw_answer: str | None) -> str | None:
+    """Extracts the item `statement` from a generator raw answer JSON."""
+    if not raw_answer or not raw_answer.strip().startswith("{"):
+        return None
+    try:
+        data = json.loads(raw_answer)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(data, dict):
+        statement = data.get("statement")
+        if isinstance(statement, str) and statement:
+            return statement
+    return None
 
 
 @router.put("/questions/{question_id}/verification", response_model=QuestionOut)
