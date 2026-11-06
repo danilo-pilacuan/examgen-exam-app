@@ -46,6 +46,7 @@ class QuestionOut(BaseModel):
     points: float | None = None
     verified_by_human: bool = False
     verified_by_ai: bool = False
+    verified_at: str | None = None
     ai_review_notes: str | None = None
     ai_review_priority: str | None = None
     source: str | None = None
@@ -73,6 +74,7 @@ class BankExportQuestion(BaseModel):
     points: float | None = None
     verified_by_human: bool = False
     verified_by_ai: bool = False
+    verified_at: str | None = None
     ai_review_notes: str | None = None
     ai_review_priority: str | None = None
     source: str | None = None
