@@ -25,6 +25,7 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 from core.infrastructure.db.connection import SessionLocal  # noqa: E402
 from core.domain.models import Subject, MaterialChunk  # noqa: E402
@@ -185,11 +186,41 @@ def generate_exam(req: ExamRequest):
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid template: {req.template_id}")
 
-    # Get the subject name
+    # Fail fast (BUG-027): refuse to generate an exam for a subject with no
+    # indexed material AND no bank questions. Otherwise the pipeline generates
+    # generic items from the LLM's general knowledge and publishes them as a
+    # real exam. Mirrors the BUG-004/C6 fail-fast guard (empty exams) and the
+    # E5 criterion of the test plan.
     db = SessionLocal()
     try:
         subject = db.get(Subject, uuid.UUID(req.subject_id))
-        subject_name = subject.name if subject else "Subject"
+        if subject is None:
+            raise HTTPException(status_code=404, detail="Subject not found")
+        subject_name = subject.name
+        from sqlalchemy import func as sa_func
+
+        chunks_count = (
+            db.query(sa_func.count(MaterialChunk.id))
+            .filter(MaterialChunk.subject_id == subject.id)
+            .scalar()
+            or 0
+        )
+        questions_count = (
+            db.execute(
+                text("SELECT count(*) FROM generated_questions WHERE subject_id = :sid"),
+                {"sid": subject.id},
+            ).scalar()
+            or 0
+        )
+        if chunks_count == 0 and questions_count == 0:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "This subject has no indexed material and no questions in the bank. "
+                    "Upload and index material (or generate questions first); otherwise "
+                    "the exam would be generated from generic knowledge, not from the subject."
+                ),
+            )
     finally:
         db.close()
 
